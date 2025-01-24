@@ -5,7 +5,9 @@ A powerful web-based tool for optimizing and simplifying 3D models while preserv
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
 any queries
-mail to vivek(mailto:domainluther1234@gmail.com)
+mail to vivek(domainluther1234@gmail.com)
+
+
 ## Features
 
 - **Real-time Preview**: Interactive 3D viewer with orbit controls
