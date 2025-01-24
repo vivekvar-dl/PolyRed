@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+build/
+dist/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+temp/
+tmp/
+
+# Compiled WebAssembly
+*.wasm
+*.wast
+
+# Project specific
+# Ignore optimized models
+*.opt.glb
+*.opt.obj
+*.opt.fbx
+*.opt.gltf
+
+# Debug files
+debug/
+*.debug
+*.pdb
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Cache directories
+.cache/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build files
+/cmake-build-*/
+/out/
+/gltf/library.wasm
+
+# Test files
+/data/

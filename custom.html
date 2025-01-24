@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Model Simplifier</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        .container { position: relative; width: 100vw; height: 100vh; }
+        .panel {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        #controls { top: 20px; left: 20px; max-width: 300px; }
+        #stats { top: 20px; right: 20px; }
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 8px;
+            background: #2b7a2f;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-weight: bold;
+        }
+        button:hover { background: #1e5420; }
+        button:focus {
+            outline: 2px solid #45a049;
+            outline-offset: 2px;
+        }
+        .mesh-stats {
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(0,0,0,0.05);
+            border-radius: 4px;
+        }
+        #loadingOverlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="controls" class="panel">
+            <input type="file" id="fileInput" accept=".obj,.glb,.gltf" aria-label="Choose 3D model file">
+            <div class="preset-buttons" role="group" aria-label="Simplification presets">
+                <button data-ratio="0.9" aria-label="Simplify to 90%">90%</button>
+                <button data-ratio="0.8" aria-label="Simplify to 80%">80%</button>
+                <button data-ratio="0.7" aria-label="Simplify to 70%">70%</button>
+                <button data-ratio="0.6" aria-label="Simplify to 60%">60%</button>
+                <button data-ratio="0.5" aria-label="Simplify to 50%">50%</button>
+                <button data-ratio="0.4" aria-label="Simplify to 40%">40%</button>
+                <button data-ratio="0.3" aria-label="Simplify to 30%">30%</button>
+                <button data-ratio="0.2" aria-label="Simplify to 20%">20%</button>
+                <button data-ratio="0.1" aria-label="Simplify to 10%">10%</button>
+            </div>
+            <button id="resetBtn" aria-label="Reset model to original state">Reset Model</button>
+            <button id="downloadBtn" aria-label="Download simplified model">Download Model</button>
+        </div>
+        <div id="stats" class="panel">
+            <h3>Mesh Statistics</h3>
+            <div id="meshStats"></div>
+            <div>Total Reduction: <span id="totalReduction">0</span>%</div>
+        </div>
+        <div id="loadingOverlay">Processing...</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+        import { MeshoptSimplifier } from './js/meshopt_simplifier.module.js';
+        import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+        class AdvancedModelSimplifier {
+            constructor() {
+                this.state = {
+                    scene: new THREE.Scene(),
+                    camera: new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+                    renderer: new THREE.WebGLRenderer({ antialias: true, alpha: true }),
+                    meshMap: new Map(),
+                    model: null,
+                    loading: false,
+                    lights: []
+                };
+                
+                this.initScene();
+                this.initControls();
+                this.setupEventListeners();
+                this.setupLights();
+            }
+
+            setupLights() {
+                const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(1, 2, 3);
+                this.state.lights = [ambientLight, directionalLight];
+                this.state.lights.forEach(light => this.state.scene.add(light));
+            }
+
+            dispose() {
+                this.state.meshMap.forEach(({ original, current }) => {
+                    original.dispose();
+                    current.dispose();
+                });
+                this.state.meshMap.clear();
+                
+                if (this.state.model) {
+                    this.state.model.traverse((child) => {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(material => material.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    });
+                }
+            }
+
+            async processLoadedModel(object) {
+                try {
+                    this.setLoading(true);
+                    
+                    this.dispose();
+                    
+                    while(this.state.scene.children.length > this.state.lights.length) {
+                        const child = this.state.scene.children[0];
+                        this.state.scene.remove(child);
+                    }
+
+                    this.state.model = object;
+                    this.state.scene.add(object);
+
+                    const box = new THREE.Box3().setFromObject(object);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const scale = 5 / maxDim;
+                    
+                    object.position.sub(center);
+                    object.scale.multiplyScalar(scale);
+
+                    object.traverse((child) => {
+                        if (child.geometry) {
+                            this.state.meshMap.set(child.uuid, {
+                                original: child.geometry.clone(),
+                                current: child.geometry,
+                                stats: this.calculateGeometryStats(child.geometry)
+                            });
+                        }
+                    });
+
+                    this.updateStatsDisplay();
+                    this.controls.reset();
+                } catch (error) {
+                    console.error('Error processing model:', error);
+                    this.showError('Failed to process model: ' + error.message);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            showError(message) {
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #ff4444;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 4px;
+                    z-index: 1000;
+                `;
+                errorDiv.textContent = message;
+                document.body.appendChild(errorDiv);
+                setTimeout(() => errorDiv.remove(), 5000);
+            }
+
+            calculateGeometryStats(geometry) {
+                return {
+                    vertices: geometry.attributes.position.count,
+                    triangles: geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3,
+                    originalVertices: geometry.attributes.position.count,
+                    originalTriangles: geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3
+                };
+            }
+
+            initScene() {
+                this.state.scene.background = new THREE.Color(0xf5f5f5);
+                this.state.renderer.setPixelRatio(window.devicePixelRatio);
+                this.state.renderer.setSize(window.innerWidth, window.innerHeight);
+                document.querySelector('.container').appendChild(this.state.renderer.domElement);
+
+                this.state.camera.position.set(0, 0, 5);
+            }
+
+            initControls() {
+                this.controls = new OrbitControls(this.state.camera, this.state.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+            }
+
+            setupEventListeners() {
+                document.querySelector('input[type="file"]').addEventListener('change', async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    this.setLoading(true);
+                    try {
+                        const buffer = await file.arrayBuffer();
+                        const extension = file.name.split('.').pop().toLowerCase();
+                        
+                        let object;
+                        if (extension === 'obj') {
+                            const loader = new OBJLoader();
+                            const blob = new Blob([buffer], { type: 'application/octet-stream' });
+                            const url = URL.createObjectURL(blob);
+                            object = await new Promise((resolve, reject) => {
+                                loader.load(url, resolve, undefined, reject);
+                            });
+                            URL.revokeObjectURL(url);
+                        } else if (extension === 'glb' || extension === 'gltf') {
+                            const loader = new GLTFLoader();
+                            const result = await new Promise((resolve, reject) => {
+                                loader.parse(buffer, '', resolve, reject);
+                            });
+                            object = result.scene;
+                        } else {
+                            throw new Error('Unsupported file format: ' + extension);
+                        }
+
+                        await this.processLoadedModel(object);
+                    } catch (error) {
+                        console.error('Error loading file:', error);
+                        alert('Error loading file: ' + error.message);
+                    } finally {
+                        this.setLoading(false);
+                    }
+                });
+
+                document.querySelectorAll('.preset-buttons button').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const ratio = parseFloat(button.dataset.ratio);
+                        this.simplifyModel(ratio);
+                    });
+                });
+
+                document.getElementById('resetBtn').addEventListener('click', () => this.resetModel());
+                
+                document.getElementById('downloadBtn').addEventListener('click', () => this.handleDownload());
+
+                window.addEventListener('resize', () => this.handleResize());
+            }
+
+            async simplifyGeometry(geometry, targetRatio) {
+                try {
+                    let workGeometry = geometry.clone();
+                    if (!workGeometry.index) {
+                        console.log('Converting to indexed geometry');
+                        workGeometry = mergeVertices(workGeometry);
+                        if (!workGeometry.index) {
+                            throw new Error('Failed to create index buffer');
+                        }
+                    }
+
+                    const positions = workGeometry.attributes.position.array;
+                    const indices = workGeometry.index.array;
+
+                    const maxValidIndex = (positions.length / 3) - 1;
+                    for (let i = 0; i < indices.length; i++) {
+                        if (indices[i] > maxValidIndex || indices[i] < 0) {
+                            throw new Error(`Invalid vertex index at position ${i}: ${indices[i]} (max valid: ${maxValidIndex})`);
+                        }
+                    }
+
+                    const targetCount = Math.max(12, Math.floor((indices.length / 3) * targetRatio)) * 3;
+
+                    const simplifiedIndices = MeshoptSimplifier.simplify(
+                        new Uint32Array(indices),
+                        new Float32Array(positions),
+                        3,
+                        targetCount,
+                        0.01,
+                        []
+                    );
+
+                    if (!simplifiedIndices || simplifiedIndices.length === 0) {
+                        throw new Error('Simplification produced no indices');
+                    }
+
+                    const newGeometry = new THREE.BufferGeometry();
+                    
+                    for (const name in workGeometry.attributes) {
+                        newGeometry.setAttribute(name, workGeometry.attributes[name].clone());
+                    }
+
+                    newGeometry.setIndex(new THREE.BufferAttribute(new Uint32Array(simplifiedIndices), 1));
+
+                    return newGeometry;
+                } catch (error) {
+                    console.error('Simplification error:', error);
+                    return null;
+                }
+            }
+
+            async simplifyModel(ratio) {
+                if (!this.state.model) {
+                    alert('No model loaded');
+                    return;
+                }
+
+                this.setLoading(true);
+                try {
+                    for (const [uuid, data] of this.state.meshMap) {
+                        console.log('Simplifying mesh:', {
+                            name: data.name,
+                            originalTriangles: data.current.index.count / 3,
+                            targetRatio: ratio
+                        });
+
+                        const simplified = await this.simplifyGeometry(data.current, ratio);
+                        if (simplified) {
+                            data.current.dispose();
+                            data.current = simplified;
+                            data.mesh.geometry = simplified;
+
+                            console.log('Mesh simplified:', {
+                                name: data.name,
+                                newTriangles: simplified.index.count / 3
+                            });
+                        }
+                    }
+
+                    this.updateStatsDisplay();
+                } catch (error) {
+                    console.error('Model simplification error:', error);
+                    alert('Error during simplification: ' + error.message);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            updateStatsDisplay() {
+                const statsContainer = document.getElementById('meshStats');
+                statsContainer.innerHTML = '';
+
+                let totalOriginalTris = 0;
+                let totalCurrentTris = 0;
+
+                for (const [uuid, data] of this.state.meshMap) {
+                    const originalStats = {
+                        vertices: data.original.attributes.position.count,
+                        triangles: data.original.index.count / 3
+                    };
+                    const currentStats = {
+                        vertices: data.current.attributes.position.count,
+                        triangles: data.current.index.count / 3
+                    };
+
+                    totalOriginalTris += originalStats.triangles;
+                    totalCurrentTris += currentStats.triangles;
+
+                    const reduction = ((1 - currentStats.triangles / originalStats.triangles) * 100).toFixed(1);
+                    
+                    const meshDiv = document.createElement('div');
+                    meshDiv.className = 'mesh-stats';
+                    meshDiv.innerHTML = `
+                        <div>Mesh ${uuid.slice(0, 6)}...</div>
+                        <div>Original: ${Math.round(originalStats.triangles)} tris</div>
+                        <div>Current: ${Math.round(currentStats.triangles)} tris</div>
+                        <div>Reduction: ${reduction}%</div>
+                    `;
+                    statsContainer.appendChild(meshDiv);
+                }
+
+                const totalReduction = ((1 - totalCurrentTris / totalOriginalTris) * 100).toFixed(1);
+                document.getElementById('totalReduction').textContent = totalReduction;
+            }
+
+            resetModel() {
+                for (const [uuid, data] of this.state.meshMap) {
+                    data.current.dispose();
+                    data.current = data.original.clone();
+                    data.mesh.geometry = data.current;
+                }
+                this.updateStatsDisplay();
+            }
+
+            fitCameraToObject(object, offset = 1.5) {
+                const box = new THREE.Box3().setFromObject(object);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = this.state.camera.fov * (Math.PI / 180);
+                const cameraDistance = Math.abs(maxDim / Math.sin(fov / 2)) * offset;
+
+                this.state.camera.position.copy(center);
+                this.state.camera.position.z += cameraDistance;
+                this.state.camera.lookAt(center);
+                this.controls.target.copy(center);
+            }
+
+            setLoading(loading) {
+                this.state.loading = loading;
+                document.getElementById('loadingOverlay').style.display = loading ? 'flex' : 'none';
+            }
+
+            handleResize() {
+                this.state.camera.aspect = window.innerWidth / window.innerHeight;
+                this.state.camera.updateProjectionMatrix();
+                this.state.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                this.controls.update();
+                this.state.renderer.render(this.state.scene, this.state.camera);
+            }
+
+            handleDownload() {
+                if (!this.state.model) {
+                    alert('No model loaded');
+                    return;
+                }
+
+                const downloadDiv = document.createElement('div');
+                downloadDiv.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                    z-index: 1000;
+                `;
+
+                const objButton = document.createElement('button');
+                objButton.textContent = 'Download as OBJ';
+                objButton.addEventListener('click', () => {
+                    downloadDiv.remove();
+                    this.downloadAs('obj');
+                });
+
+                const glbButton = document.createElement('button');
+                glbButton.textContent = 'Download as GLB';
+                glbButton.addEventListener('click', () => {
+                    downloadDiv.remove();
+                    this.downloadAs('glb');
+                });
+
+                const cancelButton = document.createElement('button');
+                cancelButton.textContent = 'Cancel';
+                cancelButton.addEventListener('click', () => downloadDiv.remove());
+
+                const title = document.createElement('h3');
+                title.textContent = 'Choose Format';
+
+                downloadDiv.appendChild(title);
+                downloadDiv.appendChild(objButton);
+                downloadDiv.appendChild(glbButton);
+                downloadDiv.appendChild(cancelButton);
+
+                document.body.appendChild(downloadDiv);
+            }
+
+            async downloadAs(format) {
+                this.setLoading(true);
+                try {
+                    let result;
+                    if (format === 'obj') {
+                        result = await this.exportToOBJ();
+                    } else if (format === 'glb') {
+                        result = await this.exportToGLB();
+                    }
+
+                    if (result) {
+                        const blob = new Blob([result.data], { type: result.type });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `simplified_model.${format}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }
+                } catch (error) {
+                    console.error('Export error:', error);
+                    alert('Error exporting model. Check console for details.');
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            async exportToOBJ() {
+                const objExporter = new OBJExporter();
+                const result = objExporter.parse(this.state.model);
+                return {
+                    data: result,
+                    type: 'text/plain'
+                };
+            }
+
+            async exportToGLB() {
+                const gltfExporter = new GLTFExporter();
+                const glbData = await new Promise((resolve, reject) => {
+                    gltfExporter.parse(
+                        this.state.model,
+                        (buffer) => resolve(buffer),
+                        (error) => reject(error),
+                        { binary: true }
+                    );
+                });
+                return {
+                    data: glbData,
+                    type: 'application/octet-stream'
+                };
+            }
+        }
+
+        const app = new AdvancedModelSimplifier();
+        window.app = app;
+        app.animate();
+    </script>
+</body>
+</html>

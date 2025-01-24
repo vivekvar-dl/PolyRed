@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced 3D Model Optimizer</title>
+    <style>
+        :root {
+            --primary-color: #2b7a2f;
+            --primary-hover: #1e5420;
+            --background-color: #f5f5f5;
+            --panel-background: rgba(255, 255, 255, 0.95);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--background-color);
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr 300px;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            padding: 20px;
+            background: var(--panel-background);
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+            overflow-y: auto;
+            max-height: 100vh;
+        }
+
+        .viewer {
+            position: relative;
+            grid-column: 2;
+        }
+
+        .right-panel {
+            padding: 20px;
+            background: var(--panel-background);
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.03);
+        }
+
+        .control-group h3 {
+            margin-bottom: 10px;
+            color: #1a1a1a;
+            font-size: 1.1em;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            margin-bottom: 15px;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            display: none;
+        }
+
+        .file-input-wrapper label {
+            display: block;
+            padding: 10px 15px;
+            background: var(--primary-color);
+            color: white;
+            text-align: center;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .file-input-wrapper label:hover {
+            background: var(--primary-hover);
+        }
+
+        .optimization-controls {
+            display: grid;
+            gap: 15px;
+        }
+
+        .slider-wrapper {
+            margin: 10px 0;
+        }
+
+        .slider-wrapper label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 5px 0;
+        }
+
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 5px 0;
+        }
+
+        .checkbox-wrapper input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-weight: 500;
+            width: 100%;
+            margin: 5px 0;
+        }
+
+        button:hover {
+            background: var(--primary-hover);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .stats-panel {
+            margin-bottom: 20px;
+        }
+
+        .stats-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+
+        .stats-value {
+            font-weight: 600;
+        }
+
+        .optimization-info {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        #loadingOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            margin-left: 5px;
+            cursor: help;
+        }
+
+        .tooltip::after {
+            content: "?";
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            background: #666;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            font-size: 12px;
+            line-height: 16px;
+        }
+
+        .tooltip:hover::before {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="control-group">
+                <h3>Upload Model</h3>
+                <div class="file-input-wrapper">
+                    <input type="file" id="fileInput" accept=".obj,.glb,.gltf,.fbx" aria-label="Choose 3D model file">
+                    <label for="fileInput">Choose File</label>
+                </div>
+                <div id="fileName" style="font-size: 0.9em; color: #666; word-break: break-all;"></div>
+            </div>
+
+            <div class="control-group">
+                <h3>Optimization Settings</h3>
+                <div class="optimization-controls">
+                    <div class="slider-wrapper">
+                        <label for="ratioSlider">Target Ratio: <span id="ratioValue">50</span>%
+                            <span class="tooltip" data-tooltip="Target percentage of triangles to keep"></span>
+                        </label>
+                        <input type="range" id="ratioSlider" min="1" max="100" value="50" aria-label="Optimization ratio">
+                    </div>
+
+                    <div class="slider-wrapper">
+                        <label for="errorSlider">Error Threshold: <span id="errorValue">0.01</span>
+                            <span class="tooltip" data-tooltip="Maximum allowed geometric error"></span>
+                        </label>
+                        <input type="range" id="errorSlider" min="0" max="100" value="1" step="0.1" aria-label="Error threshold">
+                    </div>
+
+                    <div class="slider-wrapper">
+                        <label for="normalWeight">Normal Weight: <span id="normalWeightValue">0.5</span>
+                            <span class="tooltip" data-tooltip="Weight for preserving normal vectors"></span>
+                        </label>
+                        <input type="range" id="normalWeight" min="0" max="100" value="50" aria-label="Normal weight">
+                    </div>
+
+                    <div class="slider-wrapper">
+                        <label for="boundaryWeight">Boundary Weight: <span id="boundaryWeightValue">2.0</span>
+                            <span class="tooltip" data-tooltip="Weight for preserving mesh boundaries"></span>
+                        </label>
+                        <input type="range" id="boundaryWeight" min="0" max="300" value="200" aria-label="Boundary weight">
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="lockBoundary" checked>
+                        <label for="lockBoundary">Lock Boundary Vertices
+                            <span class="tooltip" data-tooltip="Prevent modification of mesh boundaries"></span>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="preserveTopology" checked>
+                        <label for="preserveTopology">Preserve Topology
+                            <span class="tooltip" data-tooltip="Maintain mesh connectivity and structure"></span>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="optimizeVertexCache" checked>
+                        <label for="optimizeVertexCache">Optimize Vertex Cache
+                            <span class="tooltip" data-tooltip="Improve rendering performance"></span>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="weldVertices">
+                        <label for="weldVertices">Weld Vertices
+                            <span class="tooltip" data-tooltip="Merge nearby vertices"></span>
+                        </label>
+                    </div>
+
+                    <button id="optimizeBtn" disabled>Optimize Model</button>
+                    <button id="resetBtn" disabled>Reset Model</button>
+                    <button id="downloadBtn" disabled>Download Optimized Model</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="viewer">
+            <!-- 3D viewer will be inserted here -->
+        </div>
+
+        <div class="right-panel">
+            <div class="control-group">
+                <h3>Model Statistics</h3>
+                <div class="stats-panel">
+                    <div class="stats-item">
+                        <span>Vertices:</span>
+                        <span id="vertexCount" class="stats-value">0</span>
+                    </div>
+                    <div class="stats-item">
+                        <span>Triangles:</span>
+                        <span id="triangleCount" class="stats-value">0</span>
+                    </div>
+                    <div class="stats-item">
+                        <span>File Size:</span>
+                        <span id="fileSize" class="stats-value">0 KB</span>
+                    </div>
+                    <div class="stats-item">
+                        <span>Reduction:</span>
+                        <span id="reduction" class="stats-value">0%</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Advanced Settings</h3>
+                <div class="optimization-controls">
+                    <div class="slider-wrapper">
+                        <label for="vertexCacheSize">Vertex Cache Size: <span id="vertexCacheSizeValue">32</span>
+                            <span class="tooltip" data-tooltip="Size of vertex cache for optimization"></span>
+                        </label>
+                        <input type="range" id="vertexCacheSize" min="8" max="64" value="32" aria-label="Vertex cache size">
+                    </div>
+
+                    <div class="slider-wrapper">
+                        <label for="weldThreshold">Weld Threshold: <span id="weldThresholdValue">0.0001</span>
+                            <span class="tooltip" data-tooltip="Distance threshold for vertex welding"></span>
+                        </label>
+                        <input type="range" id="weldThreshold" min="0" max="100" value="1" step="0.1" aria-label="Weld threshold">
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="quantizeVertices">
+                        <label for="quantizeVertices">Quantize Vertices
+                            <span class="tooltip" data-tooltip="Reduce vertex precision for compression"></span>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="stripify">
+                        <label for="stripify">Generate Triangle Strips
+                            <span class="tooltip" data-tooltip="Convert triangles to strips for better performance"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Export Settings</h3>
+                <div class="optimization-controls">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="compressNormals" checked>
+                        <label for="compressNormals">Compress Normals
+                            <span class="tooltip" data-tooltip="Use octahedral normal compression"></span>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="compressUVs" checked>
+                        <label for="compressUVs">Compress UVs
+                            <span class="tooltip" data-tooltip="Quantize texture coordinates"></span>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="generateLODs">
+                        <label for="generateLODs">Generate LODs
+                            <span class="tooltip" data-tooltip="Create multiple detail levels"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div id="loadingText">Processing...</div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <!-- Load MeshoptSimplifier and FBX loader -->
+    <script src="./js/meshopt_simplifier.js"></script>
+
+    <script type="module">
+        // Import statements will go here
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+        import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+        // Main class implementation will go here
+        class AdvancedModelOptimizer {
+            constructor() {
+                // Initialize properties
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.setupScene();
+                this.setupLights();
+                this.setupControls();
+                this.setupEventListeners();
+                
+                this.originalModel = null;
+                this.currentModel = null;
+                this.isProcessing = false;
+                this.settings = {
+                    normalWeight: 0.5,
+                    boundaryWeight: 2.0,
+                    lockBoundary: true,
+                    preserveTopology: true,
+                    optimizeVertexCache: true,
+                    weldVertices: false,
+                    vertexCacheSize: 32,
+                    weldThreshold: 0.0001,
+                    quantizeVertices: false,
+                    stripify: false,
+                    compressNormals: true,
+                    compressUVs: true,
+                    generateLODs: false
+                };
+
+                // Start animation loop
+                this.animate();
+            }
+
+            setupScene() {
+                this.scene.background = new THREE.Color(0xf5f5f5);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.setSize(window.innerWidth - 600, window.innerHeight); // Adjust for sidebars
+                document.querySelector('.viewer').appendChild(this.renderer.domElement);
+                this.camera.position.set(0, 0, 5);
+            }
+
+            setupLights() {
+                const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(1, 2, 3);
+                this.scene.add(ambientLight, directionalLight);
+            }
+
+            setupControls() {
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+                this.controls.screenSpacePanning = true;
+                this.controls.minDistance = 0.1;
+                this.controls.maxDistance = 50;
+            }
+
+            setupEventListeners() {
+                // File input handling
+                const fileInput = document.getElementById('fileInput');
+                fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+                // UI controls
+                document.getElementById('ratioSlider').addEventListener('input', (e) => {
+                    document.getElementById('ratioValue').textContent = e.target.value;
+                });
+
+                document.getElementById('errorSlider').addEventListener('input', (e) => {
+                    document.getElementById('errorValue').textContent = (e.target.value / 100).toFixed(3);
+                });
+
+                document.getElementById('normalWeight').addEventListener('input', (e) => {
+                    document.getElementById('normalWeightValue').textContent = (e.target.value / 100).toFixed(2);
+                    this.settings.normalWeight = e.target.value / 100;
+                });
+
+                document.getElementById('boundaryWeight').addEventListener('input', (e) => {
+                    document.getElementById('boundaryWeightValue').textContent = (e.target.value / 100).toFixed(2);
+                    this.settings.boundaryWeight = e.target.value / 100;
+                });
+
+                document.getElementById('vertexCacheSize').addEventListener('input', (e) => {
+                    document.getElementById('vertexCacheSizeValue').textContent = e.target.value;
+                    this.settings.vertexCacheSize = parseInt(e.target.value);
+                });
+
+                document.getElementById('weldThreshold').addEventListener('input', (e) => {
+                    document.getElementById('weldThresholdValue').textContent = (e.target.value / 10000).toFixed(4);
+                    this.settings.weldThreshold = e.target.value / 10000;
+                });
+
+                // Checkboxes
+                document.getElementById('lockBoundary').addEventListener('change', (e) => {
+                    this.settings.lockBoundary = e.target.checked;
+                });
+
+                document.getElementById('preserveTopology').addEventListener('change', (e) => {
+                    this.settings.preserveTopology = e.target.checked;
+                });
+
+                document.getElementById('optimizeVertexCache').addEventListener('change', (e) => {
+                    this.settings.optimizeVertexCache = e.target.checked;
+                });
+
+                document.getElementById('weldVertices').addEventListener('change', (e) => {
+                    this.settings.weldVertices = e.target.checked;
+                });
+
+                document.getElementById('quantizeVertices').addEventListener('change', (e) => {
+                    this.settings.quantizeVertices = e.target.checked;
+                });
+
+                document.getElementById('stripify').addEventListener('change', (e) => {
+                    this.settings.stripify = e.target.checked;
+                });
+
+                document.getElementById('compressNormals').addEventListener('change', (e) => {
+                    this.settings.compressNormals = e.target.checked;
+                });
+
+                document.getElementById('compressUVs').addEventListener('change', (e) => {
+                    this.settings.compressUVs = e.target.checked;
+                });
+
+                document.getElementById('generateLODs').addEventListener('change', (e) => {
+                    this.settings.generateLODs = e.target.checked;
+                });
+
+                // Buttons
+                document.getElementById('optimizeBtn').addEventListener('click', () => this.optimizeModel());
+                document.getElementById('resetBtn').addEventListener('click', () => this.resetModel());
+                document.getElementById('downloadBtn').addEventListener('click', () => this.downloadModel());
+
+                // Window resize handling
+                window.addEventListener('resize', () => this.handleResize());
+            }
+
+            handleResize() {
+                this.camera.aspect = (window.innerWidth - 600) / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth - 600, window.innerHeight);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            async handleFileSelect(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                this.originalFileSize = file.size;
+                document.getElementById('fileName').textContent = file.name;
+                this.setLoading(true);
+
+                try {
+                    const buffer = await file.arrayBuffer();
+                    const extension = file.name.split('.').pop().toLowerCase();
+                    
+                    let object;
+                    if (extension === 'fbx') {
+                        const loader = new FBXLoader();
+                        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+                        const url = URL.createObjectURL(blob);
+                        object = await new Promise((resolve, reject) => {
+                            loader.load(url, resolve, 
+                                (xhr) => {
+                                    console.log(`${(xhr.loaded / xhr.total * 100)}% loaded`);
+                                },
+                                (error) => {
+                                    console.error('Error loading FBX:', error);
+                                    reject(new Error('Failed to load FBX file: ' + error.message));
+                                }
+                            );
+                        });
+                        URL.revokeObjectURL(url);
+                    } else if (extension === 'obj') {
+                        const loader = new OBJLoader();
+                        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+                        const url = URL.createObjectURL(blob);
+                        object = await new Promise((resolve, reject) => {
+                            loader.load(url, resolve, 
+                                (xhr) => {
+                                    console.log(`${(xhr.loaded / xhr.total * 100)}% loaded`);
+                                },
+                                (error) => {
+                                    console.error('Error loading OBJ:', error);
+                                    reject(new Error('Failed to load OBJ file: ' + error.message));
+                                }
+                            );
+                        });
+                        URL.revokeObjectURL(url);
+                    } else if (extension === 'glb' || extension === 'gltf') {
+                        const loader = new GLTFLoader();
+                        const result = await new Promise((resolve, reject) => {
+                            loader.parse(buffer, '', resolve, (error) => {
+                                console.error('Error loading GLTF/GLB:', error);
+                                reject(new Error('Failed to load GLTF/GLB file: ' + error.message));
+                            });
+                        });
+                        object = result.scene;
+                    } else {
+                        throw new Error(`Unsupported file format: ${extension}`);
+                    }
+
+                    await this.loadModel(object);
+                    this.enableControls();
+                } catch (error) {
+                    console.error('Error loading file:', error);
+                    this.showError(`Failed to load model: ${error.message}`);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            async loadModel(object) {
+                try {
+                    // Clear existing model
+                    if (this.currentModel) {
+                        this.scene.remove(this.currentModel);
+                        this.currentModel.traverse((child) => {
+                            if (child.geometry) child.geometry.dispose();
+                            if (child.material) {
+                                if (Array.isArray(child.material)) {
+                                    child.material.forEach(m => m.dispose());
+                                } else {
+                                    child.material.dispose();
+                                }
+                            }
+                        });
+                    }
+
+                    // Process and validate geometries
+                    object.traverse((child) => {
+                        if (child.isMesh) {
+                            // Convert materials to MeshStandardMaterial
+                            if (child.material) {
+                                const oldMaterial = child.material;
+                                const newMaterial = new THREE.MeshStandardMaterial({
+                                    color: oldMaterial.color || 0xcccccc,
+                                    metalness: 0.1,
+                                    roughness: 0.8,
+                                    map: oldMaterial.map || null,
+                                    normalMap: oldMaterial.normalMap || null,
+                                    aoMap: oldMaterial.aoMap || null,
+                                    transparent: oldMaterial.transparent || false,
+                                    opacity: oldMaterial.opacity !== undefined ? oldMaterial.opacity : 1.0
+                                });
+                                
+                                if (oldMaterial.emissive) {
+                                    newMaterial.emissive = oldMaterial.emissive;
+                                    newMaterial.emissiveIntensity = oldMaterial.emissiveIntensity || 1.0;
+                                    newMaterial.emissiveMap = oldMaterial.emissiveMap || null;
+                                }
+                                
+                                child.material = newMaterial;
+                            }
+
+                            // Ensure geometry is properly formed
+                            let geometry = child.geometry;
+                            
+                            // Convert non-indexed geometries to indexed
+                            if (!geometry.index) {
+                                geometry = mergeVertices(geometry);
+                                if (!geometry.index) {
+                                    throw new Error('Failed to create index buffer for geometry');
+                                }
+                            }
+
+                            // Validate geometry
+                            const positions = geometry.attributes.position;
+                            const indices = geometry.index;
+
+                            if (!positions || !indices) {
+                                throw new Error('Geometry missing required attributes');
+                            }
+
+                            // Check for invalid indices
+                            const maxValidIndex = positions.count - 1;
+                            for (let i = 0; i < indices.count; i++) {
+                                const index = indices.getX(i);
+                                if (index < 0 || index > maxValidIndex) {
+                                    throw new Error(`Invalid vertex index ${index} at position ${i}`);
+                                }
+                            }
+
+                            // Check for NaN values in positions
+                            for (let i = 0; i < positions.count; i++) {
+                                const x = positions.getX(i);
+                                const y = positions.getY(i);
+                                const z = positions.getZ(i);
+                                if (isNaN(x) || isNaN(y) || isNaN(z)) {
+                                    throw new Error(`NaN position value found at vertex ${i}`);
+                                }
+                            }
+
+                            // Normalize normals if they exist
+                            if (geometry.attributes.normal) {
+                                const normals = geometry.attributes.normal;
+                                for (let i = 0; i < normals.count; i++) {
+                                    const nx = normals.getX(i);
+                                    const ny = normals.getY(i);
+                                    const nz = normals.getZ(i);
+                                    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                                    if (length > 0) {
+                                        normals.setXYZ(i, nx/length, ny/length, nz/length);
+                                    }
+                                }
+                                normals.needsUpdate = true;
+                                normals.normalized = true;
+                            } else {
+                                geometry.computeVertexNormals();
+                            }
+
+                            // Update geometry
+                            child.geometry = geometry;
+                            
+                            // Ensure bounds are computed
+                            geometry.computeBoundingSphere();
+                            geometry.computeBoundingBox();
+                        }
+                    });
+
+                    // Store and display new model
+                    this.originalModel = object.clone();
+                    this.currentModel = object;
+                    this.scene.add(this.currentModel);
+
+                    // Center and scale model
+                    const box = new THREE.Box3().setFromObject(object);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const scale = 5 / maxDim;
+                    
+                    object.position.sub(center);
+                    object.scale.multiplyScalar(scale);
+
+                    // Update camera
+                    this.camera.position.set(0, 0, 10);
+                    this.controls.target.set(0, 0, 0);
+                    this.controls.update();
+
+                    // Update statistics
+                    this.updateStats();
+                    
+                    console.log('Model loaded successfully');
+                } catch (error) {
+                    console.error('Error loading model:', error);
+                    this.showError(`Failed to load model: ${error.message}`);
+                    throw error;
+                }
+            }
+
+            setLoading(loading) {
+                document.getElementById('loadingOverlay').style.display = loading ? 'flex' : 'none';
+            }
+
+            showError(message) {
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #ff4444;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 4px;
+                    z-index: 1000;
+                `;
+                errorDiv.textContent = message;
+                document.body.appendChild(errorDiv);
+                setTimeout(() => errorDiv.remove(), 5000);
+            }
+
+            showMessage(message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #44ff44;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 4px;
+                    z-index: 1000;
+                `;
+                messageDiv.textContent = message;
+                document.body.appendChild(messageDiv);
+                setTimeout(() => messageDiv.remove(), 5000);
+            }
+
+            enableControls() {
+                document.getElementById('optimizeBtn').disabled = false;
+                document.getElementById('resetBtn').disabled = false;
+                document.getElementById('downloadBtn').disabled = false;
+            }
+
+            updateStats() {
+                let vertexCount = 0;
+                let triangleCount = 0;
+
+                this.currentModel.traverse((child) => {
+                    if (child.geometry) {
+                        vertexCount += child.geometry.attributes.position.count;
+                        triangleCount += child.geometry.index ? 
+                            child.geometry.index.count / 3 : 
+                            child.geometry.attributes.position.count / 3;
+                    }
+                });
+
+                document.getElementById('vertexCount').textContent = vertexCount.toLocaleString();
+                document.getElementById('triangleCount').textContent = Math.floor(triangleCount).toLocaleString();
+                document.getElementById('fileSize').textContent = this.formatFileSize(this.originalFileSize || 0);
+
+                // Calculate reduction if we have both models
+                if (this.originalModel && this.currentModel !== this.originalModel) {
+                    let originalTriCount = 0;
+                    this.originalModel.traverse((child) => {
+                        if (child.geometry) {
+                            originalTriCount += child.geometry.index ? 
+                                child.geometry.index.count / 3 : 
+                                child.geometry.attributes.position.count / 3;
+                        }
+                    });
+                    const reduction = ((originalTriCount - triangleCount) / originalTriCount * 100).toFixed(1);
+                    document.getElementById('reduction').textContent = `${reduction}%`;
+                } else {
+                    document.getElementById('reduction').textContent = '0%';
+                }
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            async optimizeModel() {
+                if (!this.currentModel || this.isProcessing) {
+                    return;
+                }
+
+                try {
+                    this.isProcessing = true;
+                    this.setLoading(true);
+                    document.getElementById('loadingText').textContent = 'Optimizing model...';
+
+                    const targetRatio = parseInt(document.getElementById('ratioSlider').value) / 100;
+                    const errorThreshold = parseFloat(document.getElementById('errorSlider').value) / 100;
+
+                    console.log('Starting optimization with:', {
+                        targetRatio,
+                        errorThreshold,
+                        settings: this.settings
+                    });
+
+                    let optimizedCount = 0;
+                    let totalMeshes = 0;
+                    let meshesToOptimize = [];
+
+                    // First, collect all meshes that need optimization
+                    this.currentModel.traverse((child) => {
+                        if (child.isMesh && child.geometry) {
+                            totalMeshes++;
+                            meshesToOptimize.push(child);
+                        }
+                    });
+
+                    // Then optimize each mesh
+                    for (const mesh of meshesToOptimize) {
+                        try {
+                            // Store original vertex count for comparison
+                            const originalVertices = mesh.geometry.attributes.position.count;
+                            
+                            // Ensure geometry is properly indexed
+                            if (!mesh.geometry.index) {
+                                mesh.geometry = mergeVertices(mesh.geometry);
+                            }
+                            
+                            // Apply optimization
+                            const success = await this.simplifyGeometry(mesh, targetRatio, errorThreshold);
+                            
+                            if (success) {
+                                optimizedCount++;
+                                const newVertices = mesh.geometry.attributes.position.count;
+                                console.log(`Mesh optimized: ${mesh.name || 'unnamed'}`, {
+                                    originalVertices,
+                                    newVertices,
+                                    reduction: ((originalVertices - newVertices) / originalVertices * 100).toFixed(2) + '%'
+                                });
+                            }
+                        } catch (error) {
+                            console.error(`Failed to optimize mesh: ${mesh.name || 'unnamed'}`, error);
+                        }
+                    }
+
+                    // Update model statistics
+                    this.updateStats();
+
+                    if (optimizedCount > 0) {
+                        this.showMessage(`Successfully optimized ${optimizedCount} of ${totalMeshes} meshes`);
+                    } else {
+                        this.showError('No meshes could be optimized. Try adjusting the parameters.');
+                    }
+
+                } catch (error) {
+                    console.error('Optimization error:', error);
+                    this.showError(`Optimization failed: ${error.message}`);
+                } finally {
+                    this.isProcessing = false;
+                    this.setLoading(false);
+                }
+            }
+
+            async simplifyGeometry(mesh, targetRatio, errorThreshold) {
+                try {
+                    const geometry = mesh.geometry;
+                    
+                    // Basic validation
+                    if (!geometry || !geometry.attributes.position || !geometry.index) {
+                        console.error('Invalid geometry: missing required attributes');
+                        return false;
+                    }
+
+                    // Get position attribute and indices
+                    const positions = geometry.attributes.position;
+                    const indices = geometry.index;
+
+                    // Validate data
+                    if (positions.count < 3 || indices.count < 3) {
+                        console.error('Not enough vertices/indices to simplify');
+                        return false;
+                    }
+
+                    // Create arrays for validation and processing
+                    const positionsArray = new Float32Array(positions.count * 3);
+                    const indicesArray = new Uint32Array(indices.count);
+                    
+                    // Validate and normalize positions
+                    let hasInvalidPositions = false;
+                    let minX = Infinity, minY = Infinity, minZ = Infinity;
+                    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+                    
+                    for (let i = 0; i < positions.count; i++) {
+                        const x = positions.getX(i);
+                        const y = positions.getY(i);
+                        const z = positions.getZ(i);
+                        
+                        if (isNaN(x) || isNaN(y) || isNaN(z) || 
+                            !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+                            console.error(`Invalid position at vertex ${i}: (${x}, ${y}, ${z})`);
+                            hasInvalidPositions = true;
+                            // Use a default position for invalid vertices
+                            positionsArray[i * 3] = 0;
+                            positionsArray[i * 3 + 1] = 0;
+                            positionsArray[i * 3 + 2] = 0;
+                        } else {
+                            positionsArray[i * 3] = x;
+                            positionsArray[i * 3 + 1] = y;
+                            positionsArray[i * 3 + 2] = z;
+                            
+                            minX = Math.min(minX, x);
+                            minY = Math.min(minY, y);
+                            minZ = Math.min(minZ, z);
+                            maxX = Math.max(maxX, x);
+                            maxY = Math.max(maxY, y);
+                            maxZ = Math.max(maxZ, z);
+                        }
+                    }
+                    
+                    if (hasInvalidPositions) {
+                        console.warn('Found and fixed invalid positions in geometry');
+                    }
+                    
+                    // Normalize positions if the model is too large or too small
+                    const scale = Math.max(
+                        Math.abs(maxX - minX),
+                        Math.abs(maxY - minY),
+                        Math.abs(maxZ - minZ)
+                    );
+                    
+                    if (scale > 1000 || scale < 0.001) {
+                        const normalizeScale = 1 / scale;
+                        for (let i = 0; i < positions.count; i++) {
+                            positionsArray[i * 3] = (positionsArray[i * 3] - minX) * normalizeScale;
+                            positionsArray[i * 3 + 1] = (positionsArray[i * 3 + 1] - minY) * normalizeScale;
+                            positionsArray[i * 3 + 2] = (positionsArray[i * 3 + 2] - minZ) * normalizeScale;
+                        }
+                        console.log('Normalized geometry scale');
+                    }
+
+                    // Validate and copy indices
+                    const maxValidIndex = positions.count - 1;
+                    for (let i = 0; i < indices.count; i++) {
+                        const index = indices.getX(i);
+                        if (index < 0 || index > maxValidIndex) {
+                            console.error(`Invalid index ${index} at position ${i}`);
+                            return false;
+                        }
+                        indicesArray[i] = index;
+                    }
+
+                    // Validate triangle indices
+                    if (indices.count % 3 !== 0) {
+                        console.error('Index count is not a multiple of 3');
+                        return false;
+                    }
+
+                    // Calculate target triangle count
+                    const originalTriangles = indices.count / 3;
+                    const targetTriangles = Math.max(Math.ceil(originalTriangles * targetRatio), 4);
+                    const targetCount = targetTriangles * 3;
+
+                    // Enable experimental features for advanced optimization
+                    MeshoptSimplifier.useExperimentalFeatures = true;
+
+                    // Prepare simplification flags based on UI settings
+                    const flags = [];
+                    if (document.getElementById('lockBoundary').checked) flags.push('LockBorder');
+                    if (document.getElementById('preserveTopology').checked) flags.push('Sparse');
+                    if (document.getElementById('weldVertices').checked) flags.push('Prune');
+
+                    // Perform simplification
+                    let result;
+                    try {
+                        result = MeshoptSimplifier.simplify(
+                            indicesArray,
+                            positionsArray,
+                            3,
+                            targetCount,
+                            errorThreshold,
+                            flags
+                        );
+                    } catch (error) {
+                        console.error('Simplification failed:', error);
+                        return false;
+                    }
+
+                    if (!result || !Array.isArray(result) || result.length !== 2) {
+                        console.error('Invalid simplification result');
+                        return false;
+                    }
+
+                    const [newIndices, error] = result;
+                    if (!newIndices || newIndices.length < 12 || newIndices.length % 3 !== 0) {
+                        console.error('Invalid simplified indices');
+                        return false;
+                    }
+
+                    // Create new geometry with optimized data
+                    const newGeometry = new THREE.BufferGeometry();
+                    
+                    // Set position attribute
+                    newGeometry.setAttribute('position', new THREE.BufferAttribute(positionsArray, 3));
+                    
+                    // Set new indices
+                    newGeometry.setIndex(new THREE.BufferAttribute(new Uint32Array(newIndices), 1));
+
+                    // Copy UV if it exists
+                    if (geometry.attributes.uv) {
+                        newGeometry.setAttribute('uv', geometry.attributes.uv.clone());
+                    }
+
+                    // Compute vertex normals
+                    newGeometry.computeVertexNormals();
+
+                    // Validate final geometry
+                    newGeometry.computeBoundingSphere();
+                    if (isNaN(newGeometry.boundingSphere.radius)) {
+                        console.error('Invalid geometry: NaN values in final positions');
+                        return false;
+                    }
+
+                    // Clean up old geometry and assign new one
+                    geometry.dispose();
+                    mesh.geometry = newGeometry;
+
+                    console.log('Simplification successful:', {
+                        originalTriangles,
+                        newTriangles: newIndices.length / 3,
+                        error: error,
+                        reduction: ((1 - newIndices.length / indices.count) * 100).toFixed(2) + '%'
+                    });
+
+                    return true;
+                } catch (error) {
+                    console.error('Simplification error:', error);
+                    return false;
+                }
+            }
+
+            resetModel() {
+                if (!this.originalModel) return;
+
+                this.scene.remove(this.currentModel);
+                this.currentModel = this.originalModel.clone();
+                this.scene.add(this.currentModel);
+                this.updateStats();
+            }
+
+            async downloadModel(retryCount = 0) {
+                if (!this.currentModel) {
+                    this.showError('No model to download');
+                    return;
+                }
+
+                // Prevent infinite recursion
+                if (retryCount > 2) {
+                    this.showError('Could not achieve file size reduction after multiple attempts');
+                    return;
+                }
+
+                try {
+                    this.setLoading(true);
+                    const originalFileName = document.getElementById('fileName').textContent;
+                    const extension = originalFileName.split('.').pop().toLowerCase();
+                    const baseName = originalFileName.split('.')[0];
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+                    // Adjust optimization settings based on retry count
+                    const compressionSettings = {
+                        0: { // First attempt - moderate compression
+                            maxTextureSize: 1024,
+                            quantizePosition: 12,
+                            quantizeNormal: 8,
+                            quantizeTexcoord: 10
+                        },
+                        1: { // Second attempt - aggressive compression
+                            maxTextureSize: 512,
+                            quantizePosition: 11,
+                            quantizeNormal: 7,
+                            quantizeTexcoord: 8
+                        },
+                        2: { // Final attempt - maximum compression
+                            maxTextureSize: 256,
+                            quantizePosition: 10,
+                            quantizeNormal: 6,
+                            quantizeTexcoord: 6
+                        }
+                    }[retryCount];
+
+                    // Pre-process model for export
+                    this.currentModel.traverse((child) => {
+                        if (child.isMesh) {
+                            // Optimize materials and textures
+                            if (child.material) {
+                                const material = child.material;
+                                const textures = [
+                                    material.map,
+                                    material.normalMap,
+                                    material.aoMap,
+                                    material.emissiveMap
+                                ].filter(tex => tex);
+
+                                textures.forEach(texture => {
+                                    if (texture && texture.image) {
+                                        const canvas = document.createElement('canvas');
+                                        const ctx = canvas.getContext('2d');
+                                        const maxSize = compressionSettings.maxTextureSize;
+
+                                        let width = texture.image.width;
+                                        let height = texture.image.height;
+
+                                        if (width > maxSize || height > maxSize) {
+                                            if (width > height) {
+                                                height *= maxSize / width;
+                                                width = maxSize;
+                                            } else {
+                                                width *= maxSize / height;
+                                                height = maxSize;
+                                            }
+                                        }
+
+                                        canvas.width = width;
+                                        canvas.height = height;
+                                        ctx.drawImage(texture.image, 0, 0, width, height);
+                                        texture.image = canvas;
+                                        texture.needsUpdate = true;
+                                        texture.minFilter = THREE.LinearFilter;
+                                        texture.magFilter = THREE.LinearFilter;
+                                        texture.generateMipmaps = false;
+                                    }
+                                });
+
+                                // Simplify material properties
+                                material.flatShading = true;
+                                material.roughness = 1.0;
+                                material.metalness = 0.0;
+                            }
+
+                            // Optimize geometry
+                            if (child.geometry) {
+                                // Remove non-essential attributes
+                                const geometry = child.geometry;
+                                const essentialAttributes = ['position', 'normal', 'uv'];
+                                for (const key in geometry.attributes) {
+                                    if (!essentialAttributes.includes(key)) {
+                                        geometry.deleteAttribute(key);
+                                    }
+                                }
+
+                                // Normalize normals
+                                if (geometry.attributes.normal) {
+                                    const normals = geometry.attributes.normal;
+                                    for (let i = 0; i < normals.count; i++) {
+                                        const x = normals.getX(i);
+                                        const y = normals.getY(i);
+                                        const z = normals.getZ(i);
+                                        const length = Math.sqrt(x * x + y * y + z * z);
+                                        if (length > 0) {
+                                            normals.setXYZ(i, x/length, y/length, z/length);
+                                        }
+                                    }
+                                    normals.needsUpdate = true;
+                                    normals.normalized = true;
+                                }
+
+                                // Merge vertices with a larger threshold on retry attempts
+                                const mergeThreshold = 0.0001 * Math.pow(10, retryCount);
+                                geometry.merge = mergeVertices(geometry, mergeThreshold);
+                            }
+                        }
+                    });
+
+                    // Export settings
+                    const exportSettings = {
+                        binary: true,
+                        embedImages: true,
+                        includeCustomExtensions: false,
+                        forceIndices: true,
+                        truncateDrawRange: true,
+                        onlyVisible: true,
+                        precision: 6 - retryCount, // Reduce precision on retries
+                        maxTextureSize: compressionSettings.maxTextureSize,
+                        animations: [],  // Exclude animations to reduce size
+                        meshQuantization: true,
+                        meshOptCompression: true,
+                        dracoCompression: {
+                            enable: true,
+                            quantizePosition: compressionSettings.quantizePosition,
+                            quantizeNormal: compressionSettings.quantizeNormal,
+                            quantizeTexcoord: compressionSettings.quantizeTexcoord,
+                            quantizeColor: 8
+                        }
+                    };
+
+                    let result;
+                    let exportExtension;
+
+                    if (extension === 'fbx' || extension === 'glb' || extension === 'gltf') {
+                        const exporter = new GLTFExporter();
+                        result = await new Promise((resolve, reject) => {
+                            exporter.parse(
+                                this.currentModel,
+                                (gltf) => resolve(gltf),
+                                (error) => reject(error),
+                                exportSettings
+                            );
+                        });
+                        exportExtension = 'glb';
+                    } else if (extension === 'obj') {
+                        const exporter = new OBJExporter();
+                        result = exporter.parse(this.currentModel);
+                        exportExtension = 'obj';
+                    }
+
+                    const blob = new Blob(
+                        [result],
+                        { type: exportExtension === 'obj' ? 'text/plain' : 'application/octet-stream' }
+                    );
+
+                    const originalSize = this.originalFileSize || 0;
+                    const newSize = blob.size;
+
+                    if (newSize >= originalSize && retryCount < 2) {
+                        console.log(`Retry ${retryCount + 1}: File size not reduced (${this.formatFileSize(newSize)} >= ${this.formatFileSize(originalSize)})`);
+                        return await this.downloadModel(retryCount + 1);
+                    }
+
+                    // Get final statistics
+                    let totalVertices = 0;
+                    let totalTriangles = 0;
+                    this.currentModel.traverse((child) => {
+                        if (child.isMesh) {
+                            const geometry = child.geometry;
+                            totalVertices += geometry.attributes.position.count;
+                            totalTriangles += geometry.index ? geometry.index.count / 3 : 0;
+                        }
+                    });
+
+                    // Create download link
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `${baseName}_optimized_${timestamp}.${exportExtension}`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+
+                    const reduction = ((originalSize - newSize) / originalSize * 100).toFixed(2);
+                    this.showMessage(`Optimization complete:
+                        Original size: ${this.formatFileSize(originalSize)}
+                        New size: ${this.formatFileSize(newSize)}
+                        Size reduction: ${reduction}%
+                        Total vertices: ${totalVertices}
+                        Total triangles: ${totalTriangles}
+                        Compression level: ${retryCount + 1}/3`);
+
+                } catch (error) {
+                    console.error('Export error:', error);
+                    this.showError('Failed to export model: ' + error.message);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+        }
+
+        // Initialize the application
+        const modelOptimizer = new AdvancedModelOptimizer();
+        window.modelOptimizer = modelOptimizer; // Make it accessible for debugging
+    </script>
+</body>
+</html> 

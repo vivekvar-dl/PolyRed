@@ -1,0 +1,10 @@
+^E:\COMP\MESHOPTIMIZER\CMAKELISTS.TXT
+setlocal
+C:\Users\vivek\Downloads\cmake-3.31.1-windows-x86_64\cmake-3.31.1-windows-x86_64\bin\cmake.exe -SE:/comp/meshoptimizer -BE:/comp/meshoptimizer --check-stamp-file E:/comp/meshoptimizer/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -1,0 +1,16 @@
+E:\comp\meshoptimizer\src\allocator.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\allocator.obj
+E:\comp\meshoptimizer\src\clusterizer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\clusterizer.obj
+E:\comp\meshoptimizer\src\indexcodec.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\indexcodec.obj
+E:\comp\meshoptimizer\src\indexgenerator.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\indexgenerator.obj
+E:\comp\meshoptimizer\src\overdrawanalyzer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\overdrawanalyzer.obj
+E:\comp\meshoptimizer\src\overdrawoptimizer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\overdrawoptimizer.obj
+E:\comp\meshoptimizer\src\quantization.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\quantization.obj
+E:\comp\meshoptimizer\src\simplifier.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\simplifier.obj
+E:\comp\meshoptimizer\src\spatialorder.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\spatialorder.obj
+E:\comp\meshoptimizer\src\stripifier.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\stripifier.obj
+E:\comp\meshoptimizer\src\vcacheanalyzer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\vcacheanalyzer.obj
+E:\comp\meshoptimizer\src\vcacheoptimizer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\vcacheoptimizer.obj
+E:\comp\meshoptimizer\src\vertexcodec.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\vertexcodec.obj
+E:\comp\meshoptimizer\src\vertexfilter.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\vertexfilter.obj
+E:\comp\meshoptimizer\src\vfetchanalyzer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\vfetchanalyzer.obj
+E:\comp\meshoptimizer\src\vfetchoptimizer.cpp;E:\comp\meshoptimizer\meshoptimizer.dir\Release\vfetchoptimizer.obj

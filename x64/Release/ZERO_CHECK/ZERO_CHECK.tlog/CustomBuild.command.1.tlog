@@ -1,0 +1,10 @@
+^E:\COMP\MESHOPTIMIZER\CMAKEFILES\645A82EAF7A592591EF4A19A2386516D\GENERATE.STAMP.RULE
+setlocal
+C:\Users\vivek\Downloads\cmake-3.31.1-windows-x86_64\cmake-3.31.1-windows-x86_64\bin\cmake.exe -SE:/comp/meshoptimizer -BE:/comp/meshoptimizer --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file E:/comp/meshoptimizer/meshoptimizer.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
