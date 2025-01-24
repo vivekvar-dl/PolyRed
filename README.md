@@ -4,7 +4,8 @@ A powerful web-based tool for optimizing and simplifying 3D models while preserv
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
-!any queries
+
+any queries
 contact vivek(domainluther1234@gmail.com)
 
 
