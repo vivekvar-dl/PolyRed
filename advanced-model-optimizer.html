@@ -472,14 +472,67 @@
                 this.renderer.setPixelRatio(window.devicePixelRatio);
                 this.renderer.setSize(window.innerWidth - 600, window.innerHeight); // Adjust for sidebars
                 document.querySelector('.viewer').appendChild(this.renderer.domElement);
-                this.camera.position.set(0, 0, 5);
+                
+                // Add grid helper
+                const size = 20;
+                const divisions = 20;
+                const gridHelper = new THREE.GridHelper(size, divisions, 0x666666, 0x999999);
+                this.scene.add(gridHelper);
+
+                // Add axes helper
+                const axesHelper = new THREE.AxesHelper(5);
+                this.scene.add(axesHelper);
+
+                // Add a ground plane for better visibility
+                const groundGeometry = new THREE.PlaneGeometry(size, size);
+                const groundMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff,
+                    roughness: 1.0,
+                    metalness: 0.0,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.y = -0.01; // Slightly below the grid
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+                
+                // Set initial camera position further back for better visibility
+                this.camera.position.set(5, 5, 10);
+                this.camera.lookAt(0, 0, 0);
+
+                // Enable shadows
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             }
 
             setupLights() {
-                const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-                directionalLight.position.set(1, 2, 3);
-                this.scene.add(ambientLight, directionalLight);
+                // Add stronger lighting setup
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+
+                // Main directional light with shadow
+                const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                mainLight.position.set(5, 10, 5);
+                mainLight.castShadow = true;
+                mainLight.shadow.mapSize.width = 1024;
+                mainLight.shadow.mapSize.height = 1024;
+                mainLight.shadow.camera.near = 0.1;
+                mainLight.shadow.camera.far = 100;
+                mainLight.shadow.camera.left = -10;
+                mainLight.shadow.camera.right = 10;
+                mainLight.shadow.camera.top = 10;
+                mainLight.shadow.camera.bottom = -10;
+                this.scene.add(mainLight);
+
+                // Fill lights
+                const fillLight1 = new THREE.DirectionalLight(0xffffff, 0.4);
+                const fillLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+                fillLight1.position.set(-5, 2, -5);
+                fillLight2.position.set(5, -2, -5);
+                this.scene.add(fillLight1);
+                this.scene.add(fillLight2);
             }
 
             setupControls() {
@@ -595,13 +648,24 @@
                     const buffer = await file.arrayBuffer();
                     const extension = file.name.split('.').pop().toLowerCase();
                     
+                    console.log('Loading file:', {
+                        name: file.name,
+                        size: file.size,
+                        type: file.type,
+                        extension: extension
+                    });
+
                     let object;
                     if (extension === 'fbx') {
                         const loader = new FBXLoader();
                         const blob = new Blob([buffer], { type: 'application/octet-stream' });
                         const url = URL.createObjectURL(blob);
                         object = await new Promise((resolve, reject) => {
-                            loader.load(url, resolve, 
+                            loader.load(url, 
+                                (result) => {
+                                    console.log('FBX loaded successfully:', result);
+                                    resolve(result);
+                                },
                                 (xhr) => {
                                     console.log(`${(xhr.loaded / xhr.total * 100)}% loaded`);
                                 },
@@ -614,32 +678,41 @@
                         URL.revokeObjectURL(url);
                     } else if (extension === 'obj') {
                         const loader = new OBJLoader();
-                        const blob = new Blob([buffer], { type: 'application/octet-stream' });
-                        const url = URL.createObjectURL(blob);
-                        object = await new Promise((resolve, reject) => {
-                            loader.load(url, resolve, 
-                                (xhr) => {
-                                    console.log(`${(xhr.loaded / xhr.total * 100)}% loaded`);
-                                },
-                                (error) => {
-                                    console.error('Error loading OBJ:', error);
-                                    reject(new Error('Failed to load OBJ file: ' + error.message));
-                                }
-                            );
-                        });
-                        URL.revokeObjectURL(url);
+                        const text = new TextDecoder().decode(buffer);
+                        object = loader.parse(text);
+                        console.log('OBJ loaded successfully:', object);
                     } else if (extension === 'glb' || extension === 'gltf') {
                         const loader = new GLTFLoader();
                         const result = await new Promise((resolve, reject) => {
-                            loader.parse(buffer, '', resolve, (error) => {
-                                console.error('Error loading GLTF/GLB:', error);
-                                reject(new Error('Failed to load GLTF/GLB file: ' + error.message));
-                            });
+                            loader.parse(buffer, '', 
+                                (gltf) => {
+                                    console.log('GLTF/GLB loaded successfully:', gltf);
+                                    resolve(gltf);
+                                },
+                                (error) => {
+                                    console.error('Error loading GLTF/GLB:', error);
+                                    reject(new Error('Failed to load GLTF/GLB file: ' + error.message));
+                                }
+                            );
                         });
                         object = result.scene;
                     } else {
                         throw new Error(`Unsupported file format: ${extension}`);
                     }
+
+                    // Check if object is valid
+                    if (!object) {
+                        throw new Error('Loaded object is null or undefined');
+                    }
+
+                    // Log object details before loading
+                    console.log('Object before loading:', {
+                        type: object.type,
+                        children: object.children ? object.children.length : 0,
+                        isObject3D: object instanceof THREE.Object3D,
+                        position: object.position,
+                        scale: object.scale
+                    });
 
                     await this.loadModel(object);
                     this.enableControls();
@@ -653,6 +726,8 @@
 
             async loadModel(object) {
                 try {
+                    console.log('Starting model load...');
+                    
                     // Clear existing model
                     if (this.currentModel) {
                         this.scene.remove(this.currentModel);
@@ -668,21 +743,34 @@
                         });
                     }
 
-                    // Process and validate geometries
+                    // Debug info
+                    let meshCount = 0;
+                    let vertexCount = 0;
+                    let triangleCount = 0;
+
+                    // Enable shadows and process materials
                     object.traverse((child) => {
                         if (child.isMesh) {
-                            // Convert materials to MeshStandardMaterial
+                            meshCount++;
+                            vertexCount += child.geometry.attributes.position.count;
+                            triangleCount += child.geometry.index ? child.geometry.index.count / 3 : 0;
+
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                            
+                            // Convert materials to MeshStandardMaterial with better defaults
                             if (child.material) {
                                 const oldMaterial = child.material;
                                 const newMaterial = new THREE.MeshStandardMaterial({
-                                    color: oldMaterial.color || 0xcccccc,
-                                    metalness: 0.1,
+                                    color: oldMaterial.color || 0x808080,
+                                    metalness: 0.2,
                                     roughness: 0.8,
                                     map: oldMaterial.map || null,
                                     normalMap: oldMaterial.normalMap || null,
                                     aoMap: oldMaterial.aoMap || null,
                                     transparent: oldMaterial.transparent || false,
-                                    opacity: oldMaterial.opacity !== undefined ? oldMaterial.opacity : 1.0
+                                    opacity: oldMaterial.opacity !== undefined ? oldMaterial.opacity : 1.0,
+                                    side: THREE.DoubleSide  // Render both sides of faces
                                 });
                                 
                                 if (oldMaterial.emissive) {
@@ -694,88 +782,56 @@
                                 child.material = newMaterial;
                             }
 
-                            // Ensure geometry is properly formed
-                            let geometry = child.geometry;
-                            
-                            // Convert non-indexed geometries to indexed
-                            if (!geometry.index) {
-                                geometry = mergeVertices(geometry);
-                                if (!geometry.index) {
-                                    throw new Error('Failed to create index buffer for geometry');
-                                }
+                            // Ensure geometry is properly indexed
+                            if (!child.geometry.index) {
+                                console.log('Converting non-indexed geometry to indexed');
+                                child.geometry = mergeVertices(child.geometry.clone());
                             }
 
-                            // Validate geometry
-                            const positions = geometry.attributes.position;
-                            const indices = geometry.index;
-
-                            if (!positions || !indices) {
-                                throw new Error('Geometry missing required attributes');
+                            // Compute normals if they don't exist
+                            if (!child.geometry.attributes.normal) {
+                                console.log('Computing missing normals');
+                                child.geometry.computeVertexNormals();
                             }
 
-                            // Check for invalid indices
-                            const maxValidIndex = positions.count - 1;
-                            for (let i = 0; i < indices.count; i++) {
-                                const index = indices.getX(i);
-                                if (index < 0 || index > maxValidIndex) {
-                                    throw new Error(`Invalid vertex index ${index} at position ${i}`);
-                                }
-                            }
-
-                            // Check for NaN values in positions
-                            for (let i = 0; i < positions.count; i++) {
-                                const x = positions.getX(i);
-                                const y = positions.getY(i);
-                                const z = positions.getZ(i);
-                                if (isNaN(x) || isNaN(y) || isNaN(z)) {
-                                    throw new Error(`NaN position value found at vertex ${i}`);
-                                }
-                            }
-
-                            // Normalize normals if they exist
-                            if (geometry.attributes.normal) {
-                                const normals = geometry.attributes.normal;
-                                for (let i = 0; i < normals.count; i++) {
-                                    const nx = normals.getX(i);
-                                    const ny = normals.getY(i);
-                                    const nz = normals.getZ(i);
-                                    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
-                                    if (length > 0) {
-                                        normals.setXYZ(i, nx/length, ny/length, nz/length);
-                                    }
-                                }
-                                normals.needsUpdate = true;
-                                normals.normalized = true;
-                            } else {
-                                geometry.computeVertexNormals();
-                            }
-
-                            // Update geometry
-                            child.geometry = geometry;
-                            
                             // Ensure bounds are computed
-                            geometry.computeBoundingSphere();
-                            geometry.computeBoundingBox();
+                            child.geometry.computeBoundingSphere();
+                            child.geometry.computeBoundingBox();
                         }
+                    });
+
+                    console.log('Model statistics:', {
+                        meshCount,
+                        vertexCount,
+                        triangleCount
                     });
 
                     // Store and display new model
                     this.originalModel = object.clone();
                     this.currentModel = object;
-                    this.scene.add(this.currentModel);
 
-                    // Center and scale model
+                    // Get bounding box before adding to scene
                     const box = new THREE.Box3().setFromObject(object);
-                    const center = box.getCenter(new THREE.Vector3());
                     const size = box.getSize(new THREE.Vector3());
+                    const center = box.getCenter(new THREE.Vector3());
+
+                    console.log('Model bounds:', {
+                        size: size.toArray(),
+                        center: center.toArray()
+                    });
+
+                    // Reset position and apply scale
+                    object.position.copy(new THREE.Vector3(0, 0, 0));
                     const maxDim = Math.max(size.x, size.y, size.z);
                     const scale = 5 / maxDim;
-                    
-                    object.position.sub(center);
-                    object.scale.multiplyScalar(scale);
+                    object.scale.setScalar(scale);
 
-                    // Update camera
-                    this.camera.position.set(0, 0, 10);
+                    // Add to scene
+                    this.scene.add(this.currentModel);
+
+                    // Position camera based on bounding box
+                    const distance = Math.max(size.x, size.y, size.z) * 2;
+                    this.camera.position.set(distance, distance/2, distance);
                     this.controls.target.set(0, 0, 0);
                     this.controls.update();
 
@@ -783,8 +839,11 @@
                     this.updateStats();
                     
                     console.log('Model loaded successfully');
+                    
+                    // Show success message with stats
+                    this.showMessage(`Model loaded: ${meshCount} meshes, ${vertexCount.toLocaleString()} vertices`);
                 } catch (error) {
-                    console.error('Error loading model:', error);
+                    console.error('Error in loadModel:', error);
                     this.showError(`Failed to load model: ${error.message}`);
                     throw error;
                 }
@@ -888,6 +947,7 @@
                     this.setLoading(true);
                     document.getElementById('loadingText').textContent = 'Optimizing model...';
 
+                    // Get reduction ratio from slider (1-100%)
                     const targetRatio = parseInt(document.getElementById('ratioSlider').value) / 100;
                     const errorThreshold = parseFloat(document.getElementById('errorSlider').value) / 100;
 
@@ -897,54 +957,141 @@
                         settings: this.settings
                     });
 
+                    let totalVerticesBefore = 0;
+                    let totalVerticesAfter = 0;
+                    let totalTrianglesBefore = 0;
+                    let totalTrianglesAfter = 0;
                     let optimizedCount = 0;
                     let totalMeshes = 0;
-                    let meshesToOptimize = [];
 
-                    // First, collect all meshes that need optimization
+                    // First pass: count total vertices and triangles
                     this.currentModel.traverse((child) => {
                         if (child.isMesh && child.geometry) {
                             totalMeshes++;
-                            meshesToOptimize.push(child);
+                            totalVerticesBefore += child.geometry.attributes.position.count;
+                            totalTrianglesBefore += child.geometry.index ? child.geometry.index.count / 3 : 0;
                         }
                     });
 
-                    // Then optimize each mesh
-                    for (const mesh of meshesToOptimize) {
+                    // Calculate target counts for the entire model
+                    const targetTriangles = Math.max(Math.ceil(totalTrianglesBefore * targetRatio), 4);
+                    console.log('Target triangles:', targetTriangles);
+
+                    // Process each mesh
+                    const meshes = [];
+                    this.currentModel.traverse((child) => {
+                        if (child.isMesh && child.geometry) {
+                            meshes.push(child);
+                        }
+                    });
+
+                    // Sort meshes by triangle count (largest first)
+                    meshes.sort((a, b) => {
+                        const countA = a.geometry.index ? a.geometry.index.count / 3 : 0;
+                        const countB = b.geometry.index ? b.geometry.index.count / 3 : 0;
+                        return countB - countA;
+                    });
+
+                    // Process each mesh
+                    for (const mesh of meshes) {
                         try {
-                            // Store original vertex count for comparison
-                            const originalVertices = mesh.geometry.attributes.position.count;
+                            const geometry = mesh.geometry;
+                            const triangleCount = geometry.index ? geometry.index.count / 3 : 0;
                             
-                            // Ensure geometry is properly indexed
-                            if (!mesh.geometry.index) {
-                                mesh.geometry = mergeVertices(mesh.geometry);
+                            // Skip small meshes
+                            if (triangleCount < 100) {
+                                console.log('Skipping small mesh:', triangleCount, 'triangles');
+                                continue;
                             }
-                            
-                            // Apply optimization
-                            const success = await this.simplifyGeometry(mesh, targetRatio, errorThreshold);
-                            
-                            if (success) {
+
+                            // Calculate individual mesh target ratio based on its size
+                            const meshRatio = triangleCount / totalTrianglesBefore;
+                            const meshTargetTriangles = Math.max(
+                                Math.ceil(triangleCount * targetRatio),
+                                Math.ceil(targetTriangles * meshRatio)
+                            );
+
+                            console.log('Processing mesh:', {
+                                originalTriangles: triangleCount,
+                                targetTriangles: meshTargetTriangles,
+                                ratio: meshTargetTriangles / triangleCount
+                            });
+
+                            // Prepare arrays for simplification
+                            const positions = geometry.attributes.position;
+                            const indices = geometry.index;
+
+                            if (!positions || !indices) {
+                                console.log('Skipping mesh without required attributes');
+                                continue;
+                            }
+
+                            const positionsArray = new Float32Array(positions.array);
+                            const indicesArray = new Uint32Array(indices.array);
+
+                            // Set simplification flags
+                            const flags = [];
+                            if (this.settings.lockBoundary) flags.push('LockBorder');
+                            if (this.settings.preserveTopology) flags.push('Sparse');
+
+                            // Perform simplification
+                            const result = MeshoptSimplifier.simplify(
+                                indicesArray,
+                                positionsArray,
+                                3,
+                                meshTargetTriangles * 3,
+                                errorThreshold,
+                                flags
+                            );
+
+                            if (result && Array.isArray(result) && result.length === 2) {
+                                const [newIndices, error] = result;
+                                
+                                // Create new geometry
+                                const newGeometry = new THREE.BufferGeometry();
+                                newGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positionsArray, 3));
+                                newGeometry.setIndex(new THREE.Uint32BufferAttribute(newIndices, 1));
+
+                                // Transfer other attributes
+                                for (const key in geometry.attributes) {
+                                    if (key !== 'position') {
+                                        newGeometry.setAttribute(key, geometry.attributes[key].clone());
+                                    }
+                                }
+
+                                // Compute normals
+                                newGeometry.computeVertexNormals();
+
+                                // Update mesh
+                                geometry.dispose();
+                                mesh.geometry = newGeometry;
+
                                 optimizedCount++;
-                                const newVertices = mesh.geometry.attributes.position.count;
-                                console.log(`Mesh optimized: ${mesh.name || 'unnamed'}`, {
-                                    originalVertices,
-                                    newVertices,
-                                    reduction: ((originalVertices - newVertices) / originalVertices * 100).toFixed(2) + '%'
+                                totalVerticesAfter += newGeometry.attributes.position.count;
+                                totalTrianglesAfter += newIndices.length / 3;
+
+                                console.log('Mesh optimized:', {
+                                    beforeTriangles: triangleCount,
+                                    afterTriangles: newIndices.length / 3,
+                                    reduction: ((triangleCount - newIndices.length / 3) / triangleCount * 100).toFixed(2) + '%',
+                                    error: error
                                 });
                             }
                         } catch (error) {
-                            console.error(`Failed to optimize mesh: ${mesh.name || 'unnamed'}`, error);
+                            console.error('Error optimizing mesh:', error);
                         }
                     }
 
-                    // Update model statistics
+                    // Update statistics
                     this.updateStats();
 
-                    if (optimizedCount > 0) {
-                        this.showMessage(`Successfully optimized ${optimizedCount} of ${totalMeshes} meshes`);
-                    } else {
-                        this.showError('No meshes could be optimized. Try adjusting the parameters.');
-                    }
+                    const reductionPercent = ((totalTrianglesBefore - totalTrianglesAfter) / totalTrianglesBefore * 100).toFixed(2);
+                    this.showMessage(
+                        `Optimization complete:\n` +
+                        `Triangles: ${totalTrianglesBefore.toLocaleString()} → ${totalTrianglesAfter.toLocaleString()}\n` +
+                        `Reduction: ${reductionPercent}%\n` +
+                        `Optimized ${optimizedCount} of ${totalMeshes} meshes`
+                    );
 
                 } catch (error) {
                     console.error('Optimization error:', error);
@@ -952,183 +1099,6 @@
                 } finally {
                     this.isProcessing = false;
                     this.setLoading(false);
-                }
-            }
-
-            async simplifyGeometry(mesh, targetRatio, errorThreshold) {
-                try {
-                    const geometry = mesh.geometry;
-                    
-                    // Basic validation
-                    if (!geometry || !geometry.attributes.position || !geometry.index) {
-                        console.error('Invalid geometry: missing required attributes');
-                        return false;
-                    }
-
-                    // Get position attribute and indices
-                    const positions = geometry.attributes.position;
-                    const indices = geometry.index;
-
-                    // Validate data
-                    if (positions.count < 3 || indices.count < 3) {
-                        console.error('Not enough vertices/indices to simplify');
-                        return false;
-                    }
-
-                    // Create arrays for validation and processing
-                    const positionsArray = new Float32Array(positions.count * 3);
-                    const indicesArray = new Uint32Array(indices.count);
-                    
-                    // Validate and normalize positions
-                    let hasInvalidPositions = false;
-                    let minX = Infinity, minY = Infinity, minZ = Infinity;
-                    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-                    
-                    for (let i = 0; i < positions.count; i++) {
-                        const x = positions.getX(i);
-                        const y = positions.getY(i);
-                        const z = positions.getZ(i);
-                        
-                        if (isNaN(x) || isNaN(y) || isNaN(z) || 
-                            !isFinite(x) || !isFinite(y) || !isFinite(z)) {
-                            console.error(`Invalid position at vertex ${i}: (${x}, ${y}, ${z})`);
-                            hasInvalidPositions = true;
-                            // Use a default position for invalid vertices
-                            positionsArray[i * 3] = 0;
-                            positionsArray[i * 3 + 1] = 0;
-                            positionsArray[i * 3 + 2] = 0;
-                        } else {
-                            positionsArray[i * 3] = x;
-                            positionsArray[i * 3 + 1] = y;
-                            positionsArray[i * 3 + 2] = z;
-                            
-                            minX = Math.min(minX, x);
-                            minY = Math.min(minY, y);
-                            minZ = Math.min(minZ, z);
-                            maxX = Math.max(maxX, x);
-                            maxY = Math.max(maxY, y);
-                            maxZ = Math.max(maxZ, z);
-                        }
-                    }
-                    
-                    if (hasInvalidPositions) {
-                        console.warn('Found and fixed invalid positions in geometry');
-                    }
-                    
-                    // Normalize positions if the model is too large or too small
-                    const scale = Math.max(
-                        Math.abs(maxX - minX),
-                        Math.abs(maxY - minY),
-                        Math.abs(maxZ - minZ)
-                    );
-                    
-                    if (scale > 1000 || scale < 0.001) {
-                        const normalizeScale = 1 / scale;
-                        for (let i = 0; i < positions.count; i++) {
-                            positionsArray[i * 3] = (positionsArray[i * 3] - minX) * normalizeScale;
-                            positionsArray[i * 3 + 1] = (positionsArray[i * 3 + 1] - minY) * normalizeScale;
-                            positionsArray[i * 3 + 2] = (positionsArray[i * 3 + 2] - minZ) * normalizeScale;
-                        }
-                        console.log('Normalized geometry scale');
-                    }
-
-                    // Validate and copy indices
-                    const maxValidIndex = positions.count - 1;
-                    for (let i = 0; i < indices.count; i++) {
-                        const index = indices.getX(i);
-                        if (index < 0 || index > maxValidIndex) {
-                            console.error(`Invalid index ${index} at position ${i}`);
-                            return false;
-                        }
-                        indicesArray[i] = index;
-                    }
-
-                    // Validate triangle indices
-                    if (indices.count % 3 !== 0) {
-                        console.error('Index count is not a multiple of 3');
-                        return false;
-                    }
-
-                    // Calculate target triangle count
-                    const originalTriangles = indices.count / 3;
-                    const targetTriangles = Math.max(Math.ceil(originalTriangles * targetRatio), 4);
-                    const targetCount = targetTriangles * 3;
-
-                    // Enable experimental features for advanced optimization
-                    MeshoptSimplifier.useExperimentalFeatures = true;
-
-                    // Prepare simplification flags based on UI settings
-                    const flags = [];
-                    if (document.getElementById('lockBoundary').checked) flags.push('LockBorder');
-                    if (document.getElementById('preserveTopology').checked) flags.push('Sparse');
-                    if (document.getElementById('weldVertices').checked) flags.push('Prune');
-
-                    // Perform simplification
-                    let result;
-                    try {
-                        result = MeshoptSimplifier.simplify(
-                            indicesArray,
-                            positionsArray,
-                            3,
-                            targetCount,
-                            errorThreshold,
-                            flags
-                        );
-                    } catch (error) {
-                        console.error('Simplification failed:', error);
-                        return false;
-                    }
-
-                    if (!result || !Array.isArray(result) || result.length !== 2) {
-                        console.error('Invalid simplification result');
-                        return false;
-                    }
-
-                    const [newIndices, error] = result;
-                    if (!newIndices || newIndices.length < 12 || newIndices.length % 3 !== 0) {
-                        console.error('Invalid simplified indices');
-                        return false;
-                    }
-
-                    // Create new geometry with optimized data
-                    const newGeometry = new THREE.BufferGeometry();
-                    
-                    // Set position attribute
-                    newGeometry.setAttribute('position', new THREE.BufferAttribute(positionsArray, 3));
-                    
-                    // Set new indices
-                    newGeometry.setIndex(new THREE.BufferAttribute(new Uint32Array(newIndices), 1));
-
-                    // Copy UV if it exists
-                    if (geometry.attributes.uv) {
-                        newGeometry.setAttribute('uv', geometry.attributes.uv.clone());
-                    }
-
-                    // Compute vertex normals
-                    newGeometry.computeVertexNormals();
-
-                    // Validate final geometry
-                    newGeometry.computeBoundingSphere();
-                    if (isNaN(newGeometry.boundingSphere.radius)) {
-                        console.error('Invalid geometry: NaN values in final positions');
-                        return false;
-                    }
-
-                    // Clean up old geometry and assign new one
-                    geometry.dispose();
-                    mesh.geometry = newGeometry;
-
-                    console.log('Simplification successful:', {
-                        originalTriangles,
-                        newTriangles: newIndices.length / 3,
-                        error: error,
-                        reduction: ((1 - newIndices.length / indices.count) * 100).toFixed(2) + '%'
-                    });
-
-                    return true;
-                } catch (error) {
-                    console.error('Simplification error:', error);
-                    return false;
                 }
             }
 
