@@ -397,6 +397,14 @@
                             <span class="tooltip" data-tooltip="Create multiple detail levels"></span>
                         </label>
                     </div>
+
+                    <!-- Simple wireframe toggle -->
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="showWireframe">
+                        <label for="showWireframe">Show Wireframe
+                            <span class="tooltip" data-tooltip="Toggle wireframe view of the model"></span>
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -413,16 +421,20 @@
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/",
+                "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.6.8/build/index.module.js",
+                "troika-three-utils": "https://unpkg.com/troika-three-utils@0.48.0/dist/index.module.js"
             }
         }
     </script>
 
-    <!-- Load MeshoptSimplifier and FBX loader -->
+    <!-- Load external libraries -->
+    <script src="https://unpkg.com/three-mesh-bvh@0.6.8/build/index.umd.js"></script>
+    <script src="https://unpkg.com/troika-three-utils@0.48.0/dist/index.umd.js"></script>
     <script src="./js/meshopt_simplifier.js"></script>
 
     <script type="module">
-        // Import statements will go here
+        // Import statements
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
@@ -431,8 +443,13 @@
         import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
         import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
         import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+        import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 
-        // Main class implementation will go here
+        // Extend THREE.BufferGeometry with BVH methods
+        THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+        THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+        THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
         class AdvancedModelOptimizer {
             constructor() {
                 // Initialize properties
@@ -462,6 +479,21 @@
                     compressUVs: true,
                     generateLODs: false
                 };
+
+                // Add raycaster with specific options for better performance
+                this.raycaster = new THREE.Raycaster();
+                this.raycaster.firstHitOnly = true; // This is a three-mesh-bvh option
+                this.mouse = new THREE.Vector2();
+                this.selectedPart = null;
+                this.highlightedMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x00ff00,
+                    wireframe: true,
+                    wireframeLinewidth: 2,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                this.originalMaterials = new Map();
+                this.wireframeMeshes = new Map();
 
                 // Start animation loop
                 this.animate();
@@ -549,6 +581,22 @@
                 const fileInput = document.getElementById('fileInput');
                 fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
 
+                // Simple wireframe toggle
+                document.getElementById('showWireframe').addEventListener('change', (e) => {
+                    if (this.currentModel) {
+                        this.currentModel.traverse((child) => {
+                            if (child.isMesh) {
+                                if (e.target.checked) {
+                                    child.material.wireframe = true;
+                                    child.material.wireframeLinewidth = 1;
+                                } else {
+                                    child.material.wireframe = false;
+                                }
+                            }
+                        });
+                    }
+                });
+
                 // UI controls
                 document.getElementById('ratioSlider').addEventListener('input', (e) => {
                     document.getElementById('ratioValue').textContent = e.target.value;
@@ -622,6 +670,17 @@
 
                 // Window resize handling
                 window.addEventListener('resize', () => this.handleResize());
+
+                // Add mouse interaction events
+                this.renderer.domElement.addEventListener('click', (event) => this.onModelClick(event));
+                this.renderer.domElement.addEventListener('mousemove', (event) => this.onModelHover(event));
+
+                // Add keyboard event for clearing selection
+                window.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape') {
+                        this.clearSelection();
+                    }
+                });
             }
 
             handleResize() {
@@ -632,6 +691,7 @@
 
             animate() {
                 requestAnimationFrame(() => this.animate());
+                
                 this.controls.update();
                 this.renderer.render(this.scene, this.camera);
             }
@@ -743,6 +803,14 @@
                         });
                     }
 
+                    // Clear existing wireframes
+                    this.wireframeMeshes.forEach((wireframe) => {
+                        this.scene.remove(wireframe);
+                        wireframe.geometry.dispose();
+                        wireframe.material.dispose();
+                    });
+                    this.wireframeMeshes.clear();
+
                     // Debug info
                     let meshCount = 0;
                     let vertexCount = 0;
@@ -797,6 +865,23 @@
                             // Ensure bounds are computed
                             child.geometry.computeBoundingSphere();
                             child.geometry.computeBoundingBox();
+
+                            // Create wireframe if overlay is enabled
+                            if (document.getElementById('showWireframe').checked) {
+                                const wireframe = this.createWireframeMesh(child);
+                                this.scene.add(wireframe);
+                                this.wireframeMeshes.set(child, wireframe);
+                                wireframe.visible = true;
+                                
+                                // Update wireframe position and rotation
+                                wireframe.position.copy(child.position);
+                                wireframe.rotation.copy(child.rotation);
+                                wireframe.scale.copy(child.scale);
+                                wireframe.updateMatrix();
+                            }
+
+                            // Add BVH computation for better performance
+                            child.geometry.computeBoundsTree();
                         }
                     });
 
@@ -1325,6 +1410,132 @@
                     this.showError('Failed to export model: ' + error.message);
                 } finally {
                     this.setLoading(false);
+                }
+            }
+
+            createWireframeMesh(originalMesh) {
+                // Create wireframe geometry
+                const wireframeGeometry = new THREE.WireframeGeometry(originalMesh.geometry);
+                
+                // Create wireframe material
+                const wireframeMaterial = new THREE.LineBasicMaterial({
+                    color: this.wireframeColor,
+                    transparent: true,
+                    opacity: this.wireframeOpacity,
+                    depthTest: true,
+                    depthWrite: false,
+                    linewidth: 1
+                });
+
+                // Create and return line segments
+                const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+                wireframe.visible = false;
+                return wireframe;
+            }
+
+            onModelClick(event) {
+                event.preventDefault();
+                
+                // Calculate mouse position in normalized device coordinates (-1 to +1)
+                const rect = this.renderer.domElement.getBoundingClientRect();
+                this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                // Update the picking ray with the camera and mouse position
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+
+                // Calculate objects intersecting the picking ray
+                if (this.currentModel) {
+                    const intersects = [];
+                    this.currentModel.traverse((child) => {
+                        if (child.isMesh) {
+                            const intersect = this.raycaster.intersectObject(child);
+                            if (intersect.length > 0) {
+                                intersects.push(...intersect);
+                            }
+                        }
+                    });
+
+                    if (intersects.length > 0) {
+                        const nearestIntersect = intersects.reduce((nearest, current) => {
+                            return (nearest.distance < current.distance) ? nearest : current;
+                        });
+
+                        this.selectPart(nearestIntersect.object);
+                    } else {
+                        this.clearSelection();
+                    }
+                }
+            }
+
+            onModelHover(event) {
+                event.preventDefault();
+                
+                const rect = this.renderer.domElement.getBoundingClientRect();
+                this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+
+                if (this.currentModel) {
+                    const intersects = [];
+                    this.currentModel.traverse((child) => {
+                        if (child.isMesh) {
+                            const intersect = this.raycaster.intersectObject(child);
+                            if (intersect.length > 0) {
+                                intersects.push(...intersect);
+                            }
+                        }
+                    });
+
+                    // Change cursor style based on intersection
+                    this.renderer.domElement.style.cursor = intersects.length > 0 ? 'pointer' : 'default';
+                }
+            }
+
+            selectPart(mesh) {
+                // Clear previous selection
+                this.clearSelection();
+
+                if (!mesh.geometry.boundsTree) {
+                    try {
+                        mesh.geometry.computeBoundsTree({
+                            // BVH options for better performance
+                            maxLeafTris: 10,
+                            strategy: 0, // SAH strategy
+                            maxDepth: 40,
+                            verbose: false
+                        });
+                    } catch (error) {
+                        console.warn('Failed to compute bounds tree:', error);
+                    }
+                }
+
+                // Store original material
+                this.originalMaterials.set(mesh, mesh.material);
+
+                // Apply highlight material
+                const highlightMaterial = this.highlightedMaterial.clone();
+                if (mesh.material.map) {
+                    highlightMaterial.map = mesh.material.map;
+                }
+                if (mesh.material.color) {
+                    highlightMaterial.color = mesh.material.color.clone();
+                }
+                mesh.material = highlightMaterial;
+
+                this.selectedPart = mesh;
+            }
+
+            clearSelection() {
+                if (this.selectedPart) {
+                    // Restore original material
+                    const originalMaterial = this.originalMaterials.get(this.selectedPart);
+                    if (originalMaterial) {
+                        this.selectedPart.material = originalMaterial;
+                        this.originalMaterials.delete(this.selectedPart);
+                    }
+                    this.selectedPart = null;
                 }
             }
         }
